@@ -1,0 +1,10 @@
+{
+  "name": "pionex-bot",
+  "version": "1.0.0",
+  "description": "Pionex Bot Notion Reporter",
+  "main": "scheduler.js",
+  "scripts": {
+    "start": "node scheduler.js"
+  },
+  "dependencies": {}
+}
