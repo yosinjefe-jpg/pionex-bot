@@ -121,7 +121,14 @@ async function getRegNews() {
       const matchesKeyword = keywords.some(kw => titleLower.includes(kw));
       
       if (matchesKeyword) {
-        news.push({ title: title.trim(), link: link.trim() });
+        const descMatch = itemContent.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || itemContent.match(/<description>([\s\S]*?)<\/description>/);
+        let descText = descMatch ? descMatch[1] : "Sin descripción disponible.";
+        descText = descText.replace(/<\/?[^>]+(>|$)/g, ""); // Eliminar HTML
+        descText = descText.replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+        if (descText.length > 220) {
+          descText = descText.slice(0, 217) + "...";
+        }
+        news.push({ title: title.trim(), link: link.trim(), description: descText });
       }
     }
   } catch (e) {
@@ -234,7 +241,7 @@ async function main() {
     msg += `• No se detectaron noticias reguladoras urgentes en las últimas horas.\n`;
   } else {
     news.forEach(n => {
-      msg += `• <a href="${n.link}">${n.title}</a>\n`;
+      msg += `• <a href="${n.link}"><b>${n.title}</b></a>\n  <i>${n.description}</i>\n\n`;
     });
   }
   
