@@ -3,4 +3,6 @@ node_modules/
 .DS_Store
 search_results.txt
 search_results_git.txt
-test_notion.js
+scratch/
+*.log
+last_telegram_send.json

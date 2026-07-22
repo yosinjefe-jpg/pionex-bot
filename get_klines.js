@@ -50,7 +50,7 @@ async function analyzeCoin(symbol) {
 }
 
 async function run() {
-  await analyzeCoin("ETH_USDT");
+  await analyzeCoin("LINK_USDT");
 }
 
 run().catch(console.error);

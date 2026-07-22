@@ -5,7 +5,8 @@ const path = require("path");
 console.log("=========================================");
 console.log("📅 PROGRAMADOR INTELIGENTE DE REPORTES PIONEX INICIADO");
 console.log("Intervalo de chequeo: Cada 1 hora");
-console.log("Intervalo de reporte: Cada 3 días (autocurativo via Notion)");
+console.log("Notion: Cada 3 días (autocurativo via Notion)");
+console.log("Telegram: Cada 24 horas (autocurativo via archivo local)");
 console.log("Zona horaria: " + (process.env.TZ || "Default"));
 console.log("=========================================");
 
@@ -35,21 +36,24 @@ const env = loadEnv();
 const NOTION_TOKEN = env.NOTION_TOKEN;
 const NOTION_PAGE_ID = env.NOTION_PAGE_ID;
 
-// Función para ejecutar el reporte
-function runReport() {
-  console.log(`[${new Date().toISOString()}] Iniciando ejecución del reporte (notion_reporter.js)...`);
+// Ruta del archivo de persistencia local para Telegram
+const telegramTimeFile = path.join(__dirname, "last_telegram_send.json");
+
+// --------------------- SECCIÓN NOTION ---------------------
+
+function runNotionReport() {
+  console.log(`[${new Date().toISOString()}] Iniciando ejecución del reporte de Notion (notion_reporter.js)...`);
   exec("node notion_reporter.js", (error, stdout, stderr) => {
     if (error) {
       console.error(`[${new Date().toISOString()}] Error al ejecutar notion_reporter.js:`, error.message);
       if (stderr) console.error("Detalle de error:", stderr);
       return;
     }
-    console.log(`[${new Date().toISOString()}] Reporte ejecutado con éxito.`);
+    console.log(`[${new Date().toISOString()}] Reporte de Notion ejecutado con éxito.`);
     if (stdout) console.log("Salida del script:", stdout.trim());
   });
 }
 
-// Función robusta de reintento para peticiones fetch
 async function fetchWithRetry(url, options = {}, retries = 3, delay = 2000) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -63,12 +67,10 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 2000) {
   }
 }
 
-// Verificar cuándo se creó el último reporte en Notion
-async function checkAndRun() {
+async function checkAndRunNotion() {
   console.log(`[${new Date().toISOString()}] Chequeando historial de reportes en Notion...`);
   if (!NOTION_TOKEN || !NOTION_PAGE_ID) {
-    console.error("Faltan variables NOTION_TOKEN o NOTION_PAGE_ID. Ejecutando reporte por defecto.");
-    runReport();
+    console.warn("Faltan variables NOTION_TOKEN o NOTION_PAGE_ID. Omitiendo Notion.");
     return;
   }
 
@@ -87,8 +89,6 @@ async function checkAndRun() {
     if (!response.ok) {
       const errData = await response.json();
       console.error("Error al consultar Notion API:", errData);
-      console.log("Ejecutando reporte preventivo por fallo de API.");
-      runReport();
       return;
     }
 
@@ -96,12 +96,11 @@ async function checkAndRun() {
     const pages = data.results.filter(b => b.type === "child_page");
     
     if (pages.length === 0) {
-      console.log("No se encontraron reportes anteriores. Ejecutando el primer reporte.");
-      runReport();
+      console.log("No se encontraron reportes anteriores en Notion. Ejecutando el primer reporte.");
+      runNotionReport();
       return;
     }
 
-    // Obtener la fecha del reporte más reciente
     const times = pages.map(p => new Date(p.created_time).getTime());
     const maxTime = Math.max(...times);
     const lastReportDate = new Date(maxTime);
@@ -110,25 +109,80 @@ async function checkAndRun() {
     
     const diffMs = Date.now() - maxTime;
     const diffHours = diffMs / (1000 * 60 * 60);
-    console.log(`Horas transcurridas desde el último reporte: ${diffHours.toFixed(2)}h`);
+    console.log(`Horas transcurridas desde el último reporte en Notion: ${diffHours.toFixed(2)}h`);
 
-    // Si pasaron más de 71 horas (3 días aproximados con margen), generamos nuevo reporte
     if (diffHours >= 71) {
-      console.log("¡Han pasado 3 días o más! Ejecutando reporte...");
-      runReport();
+      console.log("¡Han pasado 3 días o más! Ejecutando reporte en Notion...");
+      runNotionReport();
     } else {
-      console.log(`No es necesario ejecutar el reporte aún. Faltan ${(71 - diffHours).toFixed(2)}h.`);
+      console.log(`No es necesario ejecutar Notion aún. Faltan ${(71 - diffHours).toFixed(2)}h.`);
     }
   } catch (error) {
     console.error("Error en el chequeo de Notion:", error.message);
-    console.log("Ejecutando reporte de respaldo por error en chequeo.");
-    runReport();
   }
 }
 
-// Ejecutar el chequeo inmediatamente al iniciar
-checkAndRun();
+// --------------------- SECCIÓN TELEGRAM ---------------------
 
-// Ejecutar el chequeo cada 1 hora (3600000 ms)
+function runTelegramReport() {
+  console.log(`[${new Date().toISOString()}] Iniciando ejecución del reporte de Telegram (telegram_reporter.js)...`);
+  exec("node telegram_reporter.js", (error, stdout, stderr) => {
+    if (error) {
+      console.error(`[${new Date().toISOString()}] Error al ejecutar telegram_reporter.js:`, error.message);
+      if (stderr) console.error("Detalle de error:", stderr);
+      return;
+    }
+    console.log(`[${new Date().toISOString()}] Reporte de Telegram ejecutado con éxito.`);
+    if (stdout) console.log("Salida del script:", stdout.trim());
+    
+    // Guardar fecha de envío exitosa
+    try {
+      fs.writeFileSync(telegramTimeFile, JSON.stringify({ lastSendTime: Date.now() }), "utf-8");
+    } catch (e) {
+      console.error("Error al escribir archivo de control de Telegram:", e.message);
+    }
+  });
+}
+
+function checkAndRunTelegram() {
+  console.log(`[${new Date().toISOString()}] Chequeando temporizador de Telegram...`);
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+    console.log("Variables de Telegram no configuradas. Omitiendo reporte diario.");
+    return;
+  }
+
+  let lastSendTime = 0;
+  if (fs.existsSync(telegramTimeFile)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(telegramTimeFile, "utf-8"));
+      lastSendTime = data.lastSendTime || 0;
+    } catch (e) {
+      console.warn("Error al leer last_telegram_send.json, reestableciendo...");
+    }
+  }
+
+  const diffMs = Date.now() - lastSendTime;
+  const diffHours = diffMs / (1000 * 60 * 60);
+  console.log(`Horas transcurridas desde el último reporte de Telegram: ${diffHours.toFixed(2)}h`);
+
+  // Ejecutar si pasaron más de 23 horas (1 día con margen de 1h)
+  if (diffHours >= 23) {
+    console.log("¡Han pasado 23 horas o más! Enviando reporte a Telegram...");
+    runTelegramReport();
+  } else {
+    console.log(`No es necesario enviar reporte a Telegram aún. Faltan ${(23 - diffHours).toFixed(2)}h.`);
+  }
+}
+
+// --------------------- INICIALIZACIÓN ---------------------
+
+// Ejecutar chequeos al iniciar
+checkAndRunNotion();
+checkAndRunTelegram();
+
+// Programar chequeos cada 1 hora
 const ONE_HOUR_MS = 60 * 60 * 1000;
-setInterval(checkAndRun, ONE_HOUR_MS);
+setInterval(() => {
+  checkAndRunNotion();
+  checkAndRunTelegram();
+}, ONE_HOUR_MS);
