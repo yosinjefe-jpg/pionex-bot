@@ -49,6 +49,18 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 2000) {
   }
 }
 
+async function translateText(text) {
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=es&dt=t&q=${encodeURIComponent(text)}`;
+  try {
+    const res = await fetchWithRetry(url);
+    const json = await res.json();
+    return json[0].map(s => s[0]).join("");
+  } catch (e) {
+    console.error("Error al traducir texto:", e.message);
+    return text;
+  }
+}
+
 async function pionexRequest(pathUrl, method = "GET", body = null) {
   const timestamp = Date.now().toString();
   const baseUrl = "https://api.pionex.com";
@@ -128,7 +140,9 @@ async function getRegNews() {
         if (descText.length > 220) {
           descText = descText.slice(0, 217) + "...";
         }
-        news.push({ title: title.trim(), link: link.trim(), description: descText });
+        const translatedTitle = await translateText(title.trim());
+        const translatedDesc = await translateText(descText);
+        news.push({ title: translatedTitle, link: link.trim(), description: translatedDesc });
       }
     }
   } catch (e) {
