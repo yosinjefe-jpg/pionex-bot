@@ -11,6 +11,7 @@ RUN npm install --production
 
 # Copiar los scripts de ejecución
 COPY notion_reporter.js ./
+COPY telegram_reporter.js ./
 COPY scheduler.js ./
 
 # Comando de inicio
