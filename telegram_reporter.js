@@ -176,34 +176,73 @@ async function sendTelegram(htmlMessage) {
   }
 }
 
-function getSuggestion(bot, currentPrice, profitPct, estLiq) {
+function getSuggestion(bot, currentPrice, profitPct, realized, profit, estLiq, ticker, hasRegulatoryNews) {
   const d = bot.buOrderData;
   const top = parseFloat(d.top);
   const bottom = parseFloat(d.bottom);
+  const rows = parseInt(d.row);
   const liq = parseFloat(estLiq);
   
+  const gridRange = top - bottom;
+  const gridSpacingPct = (gridRange / bottom / rows) * 100;
+  
+  let dailyVol = 0;
+  let dailyChange = 0;
+  if (ticker) {
+    const high = parseFloat(ticker.high);
+    const low = parseFloat(ticker.low);
+    dailyVol = ((high - low) / low) * 100;
+    dailyChange = parseFloat(ticker.change || "0") * 100;
+  }
+  
+  let advice = [];
+  
+  // 1. Gestión de Volatilidad
+  if (dailyVol > 7) {
+    advice.push(`⚠️ Volatilidad alta (${dailyVol.toFixed(1)}% en 24h). Mantén apalancamiento conservador. Espaciamiento de grillas actual: ${gridSpacingPct.toFixed(2)}%`);
+  } else if (dailyVol < 3.5 && dailyVol > 0) {
+    advice.push(`⚡ Baja volatilidad (${dailyVol.toFixed(1)}%). Zona ideal para acumulación de micro-arbitraje`);
+  }
+  
+  // 2. Liquidación y Margen de Seguridad
   if (!isNaN(liq) && liq > 0) {
     const distLiqPct = ((currentPrice - liq) / currentPrice) * 100;
-    if (distLiqPct < 15) {
-      return `⚠️ RIESGO ALTO: El precio está a solo ${distLiqPct.toFixed(1)}% de la liquidación (${liq.toFixed(2)}). Se sugiere agregar margen de seguridad de inmediato.`;
+    if (distLiqPct < 18) {
+      advice.push(`🚨 ALTA VULNERABILIDAD: Precio a solo ${distLiqPct.toFixed(1)}% de la liquidación (${liq.toFixed(2)}). Se sugiere inyectar margen extra de inmediato`);
+    } else if (distLiqPct > 40) {
+      advice.push(`🛡️ Liquidación muy protegida (distancia >40% a ${liq.toFixed(2)})`);
     }
   }
   
-  const distTopPct = ((top - currentPrice) / currentPrice) * 100;
-  if (distTopPct < 6) {
-    return `📈 FUERA DE RANGO SUPERIOR: El precio está muy cerca del techo (${top.toFixed(2)}). Se sugiere cerrar el bot para asegurar ganancias (+${profitPct.toFixed(1)}%) y abrir una nueva grilla con rango superior desplazado.`;
+  // 3. Posición dentro de la Cuadrícula
+  const positionPct = ((currentPrice - bottom) / gridRange) * 100;
+  if (positionPct > 90) {
+    advice.push(`📈 TOMA DE BENEFICIOS: Bot al ${positionPct.toFixed(0)}% del rango. Inventario casi agotado (convertido a USDT). Se sugiere cerrar de forma manual para asegurar el +${profitPct.toFixed(1)}% neto y reconfigurar una grilla con rango superior`);
+  } else if (positionPct < 10) {
+    advice.push(`📉 ACUMULACIÓN MÁXIMA: Bot al ${positionPct.toFixed(0)}% del rango (suelo). Inventario de compra al máximo. No cierres si confías en el soporte; de lo contrario, evalúa Stop Loss`);
+  } else {
+    advice.push(`⚖️ Grilla equilibrada (actualmente al ${positionPct.toFixed(0)}% del rango)`);
   }
   
-  const distBottomPct = ((currentPrice - bottom) / currentPrice) * 100;
-  if (distBottomPct < 6) {
-    return `📉 FUERA DE RANGO INFERIOR: El precio está muy cerca del suelo (${bottom.toFixed(2)}). Se sugiere monitorear el soporte. Si hay fuerza alcista, es zona de acumulación. Mantener margen protegido.`;
+  // 4. Momentum y Tendencia de Mercado
+  if (dailyChange > 5) {
+    advice.push(`🚀 Fuerte impulso alcista (+${dailyChange.toFixed(1)}%). El bot largo capitaliza bien la tendencia`);
+  } else if (dailyChange < -5) {
+    advice.push(`🩸 Caída de mercado (-${dailyChange.toFixed(1)}%). Mayor drawdown temporal; vigila el margen libre`);
   }
   
-  if (profitPct > 25) {
-    return `💰 ALTO RENDIMIENTO: Ganancia neta de +${profitPct.toFixed(1)}%. Se sugiere evaluar un 'Release Profit' (extraer ganancias) para asegurar beneficios sin cerrar la grilla.`;
+  // 5. Impacto Regulatorio (Noticias de Ley CLARITY)
+  if (hasRegulatoryNews) {
+    advice.push(`📰 Incertidumbre regulatoria activa (Ley CLARITY en el Senado). Evita abrir grillas con apalancamiento >3x`);
   }
   
-  return `✅ ZONA SEGURA: Operando de forma óptima en el rango. Se sugiere dejar correr para seguir capturando comisiones de grilla de forma automática.`;
+  // 6. Eficiencia de Cobertura de Grilla
+  const floatPnL = realized - profit;
+  if (floatPnL < -15 && realized < 0) {
+    advice.push(`💸 El Arbitraje de Grilla (+${profit.toFixed(1)} USDT) está absorbiendo pérdidas flotantes. Mantén la calma, la grilla está amortiguando la corrección`);
+  }
+  
+  return advice.join(" | ");
 }
 
 async function main() {
@@ -274,7 +313,8 @@ async function main() {
     const profitPct = (realized / invest) * 100;
     const sign = realized >= 0 ? "+" : "";
     
-    const suggestion = getSuggestion(bot, currentPrice, profitPct, estLiq);
+    const hasRegNews = news.length > 0;
+    const suggestion = getSuggestion(bot, currentPrice, profitPct, realized, profit, estLiq, tick, hasRegNews);
     msg += `• <b>${bot.base} (${d.trend.toUpperCase()} ${d.leverage}x)</b>\n`;
     msg += `  Grilla: <code>+${profit.toFixed(2)} USDT</code>\n`;
     msg += `  Neto: <b>${sign}${realized.toFixed(2)} USDT (${sign}${profitPct.toFixed(2)}%)</b>\n`;
