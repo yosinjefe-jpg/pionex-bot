@@ -176,6 +176,36 @@ async function sendTelegram(htmlMessage) {
   }
 }
 
+function getSuggestion(bot, currentPrice, profitPct, estLiq) {
+  const d = bot.buOrderData;
+  const top = parseFloat(d.top);
+  const bottom = parseFloat(d.bottom);
+  const liq = parseFloat(estLiq);
+  
+  if (!isNaN(liq) && liq > 0) {
+    const distLiqPct = ((currentPrice - liq) / currentPrice) * 100;
+    if (distLiqPct < 15) {
+      return `⚠️ RIESGO ALTO: El precio está a solo ${distLiqPct.toFixed(1)}% de la liquidación (${liq.toFixed(2)}). Se sugiere agregar margen de seguridad de inmediato.`;
+    }
+  }
+  
+  const distTopPct = ((top - currentPrice) / currentPrice) * 100;
+  if (distTopPct < 6) {
+    return `📈 FUERA DE RANGO SUPERIOR: El precio está muy cerca del techo (${top.toFixed(2)}). Se sugiere cerrar el bot para asegurar ganancias (+${profitPct.toFixed(1)}%) y abrir una nueva grilla con rango superior desplazado.`;
+  }
+  
+  const distBottomPct = ((currentPrice - bottom) / currentPrice) * 100;
+  if (distBottomPct < 6) {
+    return `📉 FUERA DE RANGO INFERIOR: El precio está muy cerca del suelo (${bottom.toFixed(2)}). Se sugiere monitorear el soporte. Si hay fuerza alcista, es zona de acumulación. Mantener margen protegido.`;
+  }
+  
+  if (profitPct > 25) {
+    return `💰 ALTO RENDIMIENTO: Ganancia neta de +${profitPct.toFixed(1)}%. Se sugiere evaluar un 'Release Profit' (extraer ganancias) para asegurar beneficios sin cerrar la grilla.`;
+  }
+  
+  return `✅ ZONA SEGURA: Operando de forma óptima en el rango. Se sugiere dejar correr para seguir capturando comisiones de grilla de forma automática.`;
+}
+
 async function main() {
   console.log("Generando reporte diario para Telegram...");
   
@@ -244,10 +274,12 @@ async function main() {
     const profitPct = (realized / invest) * 100;
     const sign = realized >= 0 ? "+" : "";
     
+    const suggestion = getSuggestion(bot, currentPrice, profitPct, estLiq);
     msg += `• <b>${bot.base} (${d.trend.toUpperCase()} ${d.leverage}x)</b>\n`;
     msg += `  Grilla: <code>+${profit.toFixed(2)} USDT</code>\n`;
     msg += `  Neto: <b>${sign}${realized.toFixed(2)} USDT (${sign}${profitPct.toFixed(2)}%)</b>\n`;
-    msg += `  Precio: ${currentPrice.toFixed(3)} | Liq: <pre>${parseFloat(estLiq).toFixed(2)} USDT</pre>\n\n`;
+    msg += `  Precio: ${currentPrice.toFixed(3)} | Liq: <pre>${parseFloat(estLiq).toFixed(2)} USDT</pre>\n`;
+    msg += `  💡 <i>Sugerencia: ${suggestion}</i>\n\n`;
   }
   
   msg += `<b>📰 Noticias de Regulación y Ley CLARITY:</b>\n`;
